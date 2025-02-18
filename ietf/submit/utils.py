@@ -55,6 +55,7 @@ from ietf.submit.models import ( Submission, SubmissionEvent, Preapproval, Draft
 from ietf.utils import log
 from ietf.utils.accesstoken import generate_random_key
 from ietf.utils.draft import PlaintextDraft
+from ietf.utils.htmlize import make_htmlized_fragment
 from ietf.utils.mail import is_valid_email
 from ietf.utils.text import parse_unicode, normalize_text
 from ietf.utils.timezone import date_today
@@ -648,7 +649,8 @@ def cancel_submission(submission):
 
 
 def rename_submission_files(submission, prev_rev, new_rev):
-    for ext in settings.IDSUBMIT_FILE_TYPES:
+    # TODO-BLOBSTORE decide what to do about the .htmlized submitted files
+    for ext in settings.IDSUBMIT_FILE_TYPES + ["htmlized"]:
         staging_path = Path(settings.IDSUBMIT_STAGING_PATH) 
         source = staging_path / f"{submission.name}-{prev_rev}.{ext}"
         dest = staging_path / f"{submission.name}-{new_rev}.{ext}"
@@ -685,7 +687,8 @@ def remove_staging_files(name, rev, exts=None):
     exts is a list of extensions to be removed. If None, defaults to settings.IDSUBMIT_FILE_TYPES.
     """
     if exts is None:
-        exts = [f'.{ext}' for ext in settings.IDSUBMIT_FILE_TYPES]
+        # TODO-BLOBSTORE decide what to do about the .htmlized submitted files
+        exts = [f'.{ext}' for ext in settings.IDSUBMIT_FILE_TYPES + ["htmlized"]]
     basename = pathlib.Path(settings.IDSUBMIT_STAGING_PATH) / f'{name}-{rev}' 
     for ext in exts:
         basename.with_suffix(ext).unlink(missing_ok=True)
@@ -1322,6 +1325,17 @@ def process_and_validate_submission(submission):
                     f">> stderr:\n{err.xml2rfc_stderr}"
                 )
                 raise
+
+        try:
+            html = make_htmlized_fragment(
+                staging_path(submission.name, submission.rev, ".txt").read_text()
+            )
+            store_str("staging", f"{submission.name}-{submission.rev}.htmlized", html)
+        except Exception as err:
+            log.log(
+                f"make_htmlized_fragment failure for {submission.name}-{submission.rev}: {repr(err)}"
+            )
+
         # Parse text, whether uploaded or generated from XML
         text_metadata = process_submission_text(submission.name, submission.rev)
 
